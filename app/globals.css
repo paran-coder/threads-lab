@@ -4,3 +4,5 @@
 .ai-connect-panel{display:flex;align-items:center;justify-content:space-between;gap:24px}.ai-connect-panel .panel-desc{margin-bottom:0;max-width:510px}.ai-connect-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}@media(max-width:700px){.ai-connect-panel{flex-direction:column;align-items:stretch}.ai-connect-actions{justify-content:flex-start}}
 
 .paused-alert{display:flex;align-items:center;gap:13px;background:#fff5e9;border:1px solid #f1d7b4;border-radius:12px;padding:17px 20px;margin-bottom:18px;color:#99692e}.paused-alert>div{flex:1}.paused-alert strong{font-size:13px}.paused-alert p{font-size:11px;margin-top:5px;line-height:1.6}.paused-alert .btn{white-space:nowrap}@media(max-width:700px){.paused-alert{align-items:flex-start;flex-direction:column}}
+/* One-click local bridge connection */
+.connect-hint{margin-top:18px!important;font-size:12px!important;color:#677c6f!important;max-width:640px;line-height:1.7!important}

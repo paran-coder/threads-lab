@@ -1,7 +1,7 @@
 'use client';
-import {useEffect,useMemo,useState,useCallback} from 'react';
+import {useEffect,useMemo,useState,useCallback,useRef} from 'react';
 import {Activity,ArrowDownToLine,ArrowRight,BookOpen,CalendarClock,Check,CheckCircle2,ChevronRight,Clock3,Cloud,Compass,ExternalLink,FileText,KeyRound,Laptop,Link2,LoaderCircle,LockKeyhole,LogOut,Menu,Plus,RefreshCcw,Search,Send,Settings2,ShieldCheck,Sparkles,SquarePen,TrendingUp,X,AlertCircle} from 'lucide-react';
-import {Analysis,Draft,Example,OwnPost,Post,Recommendation,Settings,authorizeSite,initPair,isPaired,pair,request} from '@/lib/bridge';
+import {Analysis,Draft,Example,OwnPost,Post,Recommendation,Settings,PreparedConnection,clearPair,connectBridge,prepareConnection,initPair,isPaired,request} from '@/lib/bridge';
 
 type Screen='overview'|'research'|'analyze'|'write'|'queue'|'settings';
 const nav:{id:Screen,label:string,icon:typeof Activity}[]=[
@@ -18,7 +18,7 @@ function metricValue(insight:unknown,name:string):number|null{
 }
 export default function Page(){
   const [screen,setScreen]=useState<Screen>('overview'),[mobileNav,setMobileNav]=useState(false),[paired,setPaired]=useState(false),
-    [aiReady,setAiReady]=useState(false),[threadsReady,setThreadsReady]=useState(false),[pairCode,setPairCode]=useState(''),
+    [aiReady,setAiReady]=useState(false),[threadsReady,setThreadsReady]=useState(false),[connectReady,setConnectReady]=useState(false),
     [identity,setIdentity]=useState(''),[threadsToken,setThreadsToken]=useState(''),[settings,setSettings]=useState<Settings>(defaults),
     [posts,setPosts]=useState<Post[]>([]),[own,setOwn]=useState<OwnPost[]>([]),[examples,setExamples]=useState<Example[]>([]),
     [exampleText,setExampleText]=useState(''),[exampleUrl,setExampleUrl]=useState(''),[keyword,setKeyword]=useState(''),
@@ -31,9 +31,31 @@ export default function Page(){
     const [state,ai]=await Promise.all([request<{connected:boolean,posts:Post[],examples:Example[],settings:Settings,pauseReason:string|null}>('/threads/status'),request<{account?:{type:string}}>("/status").catch(()=>({account:undefined}))]);
     setPaired(true);setThreadsReady(state.connected);setAiReady(Boolean(ai.account));setPosts(state.posts);setExamples(state.examples);setSettings(state.settings);setPauseReason(state.pauseReason);
   },[]);
-  useEffect(()=>{initPair();if(isPaired())void refresh().catch(()=>setPaired(false));},[refresh]);
-  const onPair=async()=>{await wrap('연결 중',async()=>{await pair(pairCode.trim());await refresh();alert('공통 AI연결앱이 연결되었습니다.');});};
-  const onApprove=async()=>{await wrap('승인 중',async()=>{await authorizeSite(s=>setNotice(s));await refresh();alert('사이트 연결 승인이 완료되었습니다.');});};
+  const prepared=useRef<PreparedConnection|null>(null);
+  const primeConnection=useCallback(async()=>{
+    const next=await prepareConnection();prepared.current=next;setConnectReady(true);
+  },[]);
+  useEffect(()=>{
+    initPair();
+    void primeConnection().catch(()=>alert('안전한 연결 준비에 실패했습니다. HTTPS 페이지에서 새로고침해 주세요.',true));
+    if(isPaired())void refresh().catch(e=>{
+      setPaired(false);clearPair();
+      if(e instanceof Error&&e.message.includes('Threads 관리 기능'))alert(e.message,true);
+    });
+  },[refresh,primeConnection]);
+  const onConnect=()=>{
+    const attempt=prepared.current;
+    if(!attempt){alert('브릿지 연결을 준비 중입니다. 잠시 후 다시 눌러 주세요.',true);return;}
+    // start connectBridge before any async boundary to preserve browser user activation
+    void wrap('브릿지 연결 중',async()=>{
+      await connectBridge(attempt,message=>setNotice(message));
+      // A v1.15.1 bridge can pair successfully, but cannot handle Threads endpoints.
+      // Validate capabilities before reporting "connected".
+      try{await refresh();}catch(e){clearPair();setPaired(false);throw e;}
+      alert('공통 AI연결앱이 자동 연결되었습니다.');
+      void primeConnection().catch(()=>setConnectReady(false));
+    });
+  };
   const api=<T,>(label:string,endpoint:string,body:Record<string,unknown>={})=>wrap(label,()=>request<T>(endpoint,body));
   const loginAi=async()=>{await wrap('AI 계정 연결 중',async()=>{const result=await request<{authUrl?:string,alreadyLoggedIn?:boolean}>('/login',{remember:true});if(result.authUrl){const url=new URL(result.authUrl);if(!['auth.openai.com','auth0.openai.com','chatgpt.com'].includes(url.hostname)||url.protocol!=='https:')throw new Error('공식 로그인 주소가 아닙니다.');window.open(result.authUrl,'_blank','noopener,noreferrer');alert('열린 공식 ChatGPT 로그인 화면에서 인증한 뒤 상태를 다시 확인하세요.');}else{await refresh();alert('AI 계정 연결 상태를 확인했습니다.');}});};
   const linkThreads=async()=>{const ret=await api<{identity:{username:string}}>('계정 연결 중','/threads/connect',{token:threadsToken.trim()});if(ret){setThreadsToken('');setThreadsReady(true);setIdentity('@'+ret.identity.username);alert('Threads 연결 및 권한 확인을 완료했습니다.');}};
@@ -70,7 +92,7 @@ export default function Page(){
       <div className="content">
         {(notice||error)&&<div className={'toast '+(error?'error':'success')} role="status">{error?<AlertCircle size={19}/>:<CheckCircle2 size={19}/>}<span>{error||notice}</span><button onClick={()=>{setError('');setNotice('');}} aria-label="닫기"><X size={16}/></button></div>}
         {busy&&<div className="busy-inline"><LoaderCircle size={15} className="spinning"/> {busy}…</div>}
-        {!paired&&<section className="connect-hero"><div className="eyebrow">FIRST STEP <span className="sparkle">✦</span></div><h1>콘텐츠 연구소에<br/>브릿지앱을 연결하세요.</h1><p>Codex로 글을 분석하고, Threads 공식 API로 예약 발행합니다. 모든 실행은 사용자 PC를 중심으로 이루어집니다.</p><div className="connect-actions"><button className="btn primary" onClick={onApprove} disabled={!!busy}><Link2 size={16}/>사이트 연결 승인</button><div className="inline-pair"><input aria-label="연결 코드" placeholder="또는 연결 코드 입력" value={pairCode} onChange={e=>setPairCode(e.target.value)}/><button className="btn dark" onClick={onPair} disabled={!!busy||!pairCode.trim()}>연결</button></div></div><div className="hero-foot"><ShieldCheck size={16}/>연결은 127.0.0.1:7330 로컬 주소에만 요청합니다.</div></section>}
+        {!paired&&<section className="connect-hero"><div className="eyebrow">FIRST STEP <span className="sparkle">✦</span></div><h1>콘텐츠 연구소에<br/>브릿지앱을 연결하세요.</h1><p>Codex로 글을 분석하고, Threads 공식 API로 예약 발행합니다. 모든 실행은 사용자 PC를 중심으로 이루어집니다.</p><div className="connect-actions"><button className="btn primary" onClick={onConnect} disabled={!!busy||!connectReady}><Link2 size={16}/>{connectReady?'AI 브릿지 연결하기':'안전한 연결 준비 중…'}</button></div><p className="connect-hint">연결 코드 입력은 필요 없습니다. 기존 Codex 로그인은 자동 인식하며, 처음 연결할 때만 Windows에서 사이트 주소를 승인하세요. AI연결앱 v1.16.0 이상이 필요합니다.</p><div className="hero-foot"><ShieldCheck size={16}/>연결은 127.0.0.1:7330 로컬 주소에만 요청합니다.</div></section>}
         {paired&&screen==='overview'&&<>
           <section className="page-lead"><div><div className="eyebrow">YOUR CONTENT INTELLIGENCE</div><h1>좋은 글은, 분석에서 시작됩니다.</h1><p>자료를 모으고 인사이트를 발견한 뒤, 다음 게시글을 설계하세요.</p></div><button className="btn primary" onClick={()=>setScreen('analyze')}><Sparkles size={16}/> 분석 시작 <ArrowRight size={16}/></button></section>
           <div className="metrics">{[{label:'내 글 분석 대상',value:cards.total,icon:FileText,postfix:'개'},{label:'참고 게시글',value:cards.reference,icon:BookOpen,postfix:'개'},{label:'발행 대기',value:cards.waiting,icon:Clock3,postfix:'개'},{label:'발행 완료',value:cards.published,icon:CheckCircle2,postfix:'개'}].map(x=><div className="metric-card" key={x.label}><span>{x.label}</span><div className="metric-value">{x.value}<em>{x.postfix}</em></div><x.icon size={19} className="metric-icon"/></div>)}</div>
